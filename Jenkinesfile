@@ -1,0 +1,108 @@
+node('esb-agent') {
+
+  def serviceRepoUrl = 'https://github.wm.com/esb/Jenkins-Lambda-Create-Update.git'
+    properties([
+      parameters ([
+        choice(name: 'Environment', choices: ['Dev', 'QAT', 'Prod'], description: 'Select the AWS Account'),
+        string(name: 'taskdefi', description: 'task-definition_name'),
+        string(name: 'MemoryValue', defaultValue: '128', description: 'Example: 128, 512, 1024 etc'),
+        string(name: 'cpu', defaultValue: '512', description: 'Example: 512,1024, etc'),
+		string(name: 'EnvironmentValues', description: 'Use Syntax - [{"key1": "value1"},{"key2": "value2"}]'),
+        string(name: 'Tags', defaultValue: 'Owner=esbuser', description: 'Enter Tags in Format- KeyName1=string,KeyName2=string'),
+        string(name: 'Layers', description: 'Enter the ARN of the layer'),
+		string(name: 'desiredcount', defaultValue: '1',description: 'Enter the number of tasks def count'),
+        ])
+    ])
+  def gitCredentials = 'esb-github'
+  def task-definition_name = "${params.taskdefi}"
+  def branch = "${BRANCH_NAME}"
+  def memory   = "${params.MemoryValue}"
+  def envvars = "${params.EnvironmentValues}"
+  def clusterName ='ecs-cluster'
+  def tags = "${params.Tags}"
+  def region = "us-east-1"
+  def deploymentType = 'ecs'
+  def workSpace = 'workspace'
+  def taskcount = "${params.desiredcount}"
+  def ecrrepo= '125855726099.dkr.ecr.us-east-1.amazonaws.com/awsecs'
+  def ecs = 'script/env-vars-persist.sh'
+  def containerOpts = '[{\"name\":\$deploymentType\",\"image\":\$ecrrepo\",\"cpu\":$cpu,\"memory\":$memory,\"essential\":true}]'
+  switch (params.Environment) {
+  case "Dev":
+    user = "esb-jenkins-be"
+    accountno = "420994994914"
+	serviceName ='dev-service'
+    break
+  case "QAT":
+    user = "esb-jenkins-qat"
+    accountno = "116262102699"
+	serviceName ='qa-service'
+    break
+  case "Prod":
+    user = "esb-prd-jenkins-be"
+    accountno = "236410771035"
+	serviceName ='prod-service'
+    break
+  }
+  def usercrendentials = "$user"
+  def role = "ecsTaskRole"
+  def service=$serviceName
+
+  try{
+    stage('Checkout') {
+      ws("$workSpace/$deploymentType") {
+        step([$class: 'WsCleanup'])
+        sh "echo checking out code from ${BRANCH_NAME}"
+        checkout([$class: 'GitSCM', branches: [
+          [name: branch]
+        ], userRemoteConfigs: [
+          [credentialsId: gitCredentials, url: serviceRepoUrl]
+        ]])
+
+      }
+    }
+
+    stage('deploy ecs') {
+      ws("$workSpace/$deploymentType") {
+        withAWS(credentials: usercrendentials, region: 'us-east-1') {
+          
+		  
+		  if ( "$cpu" != ''  && "$memory" ! ='' && " $envvars" != ''){
+		  
+				echo "new container definitions found"
+				sh  "chmod +x $ecs-deployscript"
+				sh ./ecs-deployscript.sh $task-definition_name $service $containerOpts $clusterName $taskcount
+				
+		  }
+		  
+		}
+		  
+		  
+		  
+        }
+      }
+    }
+    currentBuild.result = 'SUCCESS'
+  } catch (e) {
+    echo 'This will run only if failed'
+    currentBuild.result = 'FAILURE'
+    throw e
+  } finally {
+    withAWS(credentials: usercrendentials, region: 'us-east-1') {
+      def RESULT = "${currentBuild.result}"
+      if (RESULT == "FAILURE") {
+        sh "aws ecs deregister-task-definition $task-definition_name --cluster $clusterName"
+      }
+    }
+  }
+}
+
+
+
+
+
+
+
+
+
+  
