@@ -2,7 +2,9 @@
    "memory":"1024",
    "networkMode":"awsvpc",
    "cpu":"512",
-   "family":"wildfly",
+   "family":"wildfly",j
+   
+   
     "containerDefinitions": [
         {
             "cpu":512,
